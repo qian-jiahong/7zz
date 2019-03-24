@@ -1,0 +1,181 @@
+#!/usr/bin/perl
+
+# 调用 7z 压缩，使用最快速的压缩配置
+# 可以把本文件复制到 /usr/bin/，方便日常执行
+#
+# 钱家洪 2019.03.24
+
+use Cwd;                            # getcwd()
+use utf8;
+use Encode qw/encode decode is_utf8/;
+
+
+my %binListHashMap = (
+    '7zip' => '/usr/bin/7z'         # 7zip 压缩程序
+);
+my $rootDir = getcwd();             # 当前目录
+my $performanceChk = 1;
+my $debug = 0;
+
+if (!chkMustEnv(1)){
+    showError("缺少必要的程序 7zip, 运行命令安装: sudo apt-get install p7zip");
+    exit 1;
+}  
+
+if ($#ARGV < 0) {
+    Usage();
+}
+
+my $path = "";
+my $target = "";
+while ( $#ARGV != -1 ) {
+    if ( $ARGV[0] =~ /^-(h|help)$/ ) {
+        Usage();
+    } elsif ( $ARGV[0] =~ /^-(d|debug)$/ ) {
+        $debug = 1;
+    } else {
+        $path = shift(@ARGV);
+        if ( $#ARGV != -1 ) {
+            $target = shift(@ARGV);
+        }
+
+        @ARGV = ();
+    }
+
+    shift(@ARGV);
+}
+
+if (-e $path) {
+    my $pos = 0;
+
+    # 去掉源路径最后的目录分隔符
+    if ((-d $path) and $path =~ /.+\/$/) {
+        $pos = rindex($path, "\/");
+        $path = substr($path, 0, $pos);
+    }
+    
+    if ($target eq "") {
+        $target = $path;
+    } else {
+        if ($target =~ /.+\/$/){
+            showError("存档不能是目录: $target");
+        }
+
+        $target =~ s/^\.\///;
+    }
+
+    if ($target !~ /\.7z$/) {
+        $target .= '.7z';
+    }
+
+    showMessageLn("存档: $target") if ($debug); 
+
+    # 检查目标父目录是否可写
+    my $perentPath = $rootDir;
+    $pos = rindex($target, "\/");
+    if ($pos >= 0) {
+        if ($pos == 0) {
+            $perentPath = '/';
+        } else {
+            $perentPath = substr($path, 0, $pos);
+        }
+    }
+    
+    showMessageLn("存档目录: $perentPath") if ($debug); 
+
+    if (! -w $perentPath) {
+        showError("没有权限创建存档, 请检查目录是否有权限: $target");
+    }
+    
+    my $myCmd = "7za a -t7z -m0=lzma2 -mx=5 -mmt $target $path";
+    # showMessageLn("myCmd: $myCmd");
+    my $startTime = time() if ($performanceChk);
+    system("sleep 0.01");     # 让此前的信息全部输出到命令行窗口
+    system("$myCmd");
+    if ($performanceChk) {
+        my $seconds = (time() - $startTime);
+        my $hour = int($seconds / 60 / 60);
+        my $minute = int($seconds / 60 % 60);
+        my $second = $seconds % 60;
+        showMessageLn('耗时：' . sprintf("%02d:%02d:%02d", $hour, $minute, $second));
+    }
+} elsif ($path eq "") {
+    showMessageLn("请输入要压缩的文件或目录");
+} else {
+    showError("文件或目录不存在: $path");
+}
+exit 1;
+
+sub chkMustEnv {
+    my($silence) = @_;		# 获得传入参数
+
+    my @lackList;
+    showMessageLn("运行环境检查...\n--------------------------") if (!$silence);
+    foreach my $bin (values(%binListHashMap)) {
+        $msg = -f $bin ? '已安装' : '缺少';
+        showMessageLn($bin . "\t" . $msg) if (!$silence);
+        push(@lackList, $bin) if (!-f $bin);
+    }
+    showMessageLn('') if (!$silence);
+
+    $size = @lackList;
+    return ($size < 1);
+}
+
+# 在命令窗口输出消息
+sub showMessage {
+	my($c_string) = @_;		# 获得传入参数
+    my $l_string = $c_string;
+    
+    $l_string = encode("gbk",$c_string) if (isWin32());         # Windows 操作系统中避免启用 utf8 状态下乱码
+    Encode::_utf8_off($l_string) if (isLinux());		        # Linux 操作系统中避免出现提示宽字符警告
+    
+	print $l_string; 
+}
+
+sub showMessageLn {
+	my($p_string) = @_;		# 获得传入参数
+
+	# 处理参数是 undef 的情况
+	my $c_string = '';
+	if ($p_string) {
+		$c_string = $p_string
+	}
+
+	showMessage($c_string."\n") ; 
+}
+
+sub showError {
+    my($c_string) = @_;		# 获得传入参数
+    # printf("*** 错误: %s\n", $c_string);
+    showMessageLn("*** 错误: $c_string");
+    exit 0;
+}
+
+# 当前操作系统是: Linux
+sub isLinux {
+    return ($^O =~ /linux/i);
+}
+
+# 当前操作系统是: Windows
+sub isWin32 {
+    return ($^O =~ /MSWin32/i);
+}
+
+sub Usage {
+    my $usage = << "__END_OF_USAGE";
+
+调用 7zip 压缩文件或目录, 使用最快速的配置以 7z 格式存储
+  7zz <文件或目录的路径 | -h | -help> [存档]
+
+示例: 
+  7zz ~/a/b/c
+  结果生成 ~/a/b/c.7z
+
+  7zz ~/a/b/c ~/d.7z
+  结果生成 ~/d.7z
+
+__END_OF_USAGE
+    showMessage($usage);
+    exit 1;
+}
